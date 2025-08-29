@@ -40,12 +40,11 @@ private:
     size_t length = 0;
 
     void preSpecialize(const char *package_name, const char *app_data_dir) {
-        if (strcmp(package_name, "com.YoStarEN.Arknights") == 0 ||
-            strcmp(package_name, "com.YoStarJP.Arknights") == 0) {
+        if (strcmp(package_name, "com.Gaggle.fun.GooseGooseDuck") == 0) {
 
             LOGI("detect game: %s", package_name);
             enable_hack = true;
-            game_data_dir = strdup(app_data_dir); // dễ quản lý hơn new[]
+            game_data_dir = strdup(app_data_dir);
 
 #if defined(__i386__)
             const char *path = "zygisk/x86.so";
