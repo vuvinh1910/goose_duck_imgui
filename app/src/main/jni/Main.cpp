@@ -174,6 +174,7 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
             ImGui::SliderInt(oxorany("##PSpeed"), &speed, 5, 20);
 
             ImGui::Checkbox(oxorany("NoFog"), &noFog);
+            ImGui::Checkbox(oxorany("NoClip"), &noClip);
             ImGui::Checkbox(oxorany("NoCD"), &noCoolDown);
 
             if (ImGui::Button(oxorany("Call Emergency"))) {
@@ -232,6 +233,8 @@ void *Init_thread()
 	Attach();
 	PollUnicodeChars();
     TouchInput::Init();
+
+    playerCollider = GetFieldOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayableEntity") , oxorany("playerCollider"));
 
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.SpecialBehaviour"), oxorany("FogOfWar") , oxorany("FixedUpdate"), 0), (void *) FogUpdate , (void **) &_FogUpdate);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("LocalPlayer") , oxorany("FixedUpdate"), 0), (void *) PlayerUpdate , (void **) &_PlayerUpdate);

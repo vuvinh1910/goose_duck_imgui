@@ -15,7 +15,8 @@
 #endif
 
 int speed = 5, zoom = 1;
-bool noFog,noCoolDown,callBell;
+bool noFog,noCoolDown,callBell,noClip;
+uintptr_t playerCollider;
 
 struct ObscuredInt {
     int currentCryptoKey;    // 0x10
@@ -80,6 +81,34 @@ ObscuredFloat FloatToObscuredFloat(float value) {
     return ObscuredFloat_OpImplicit(value);
 }
 
+struct ObscuredBool {
+    uint8_t  currentCryptoKey;   // 0x10
+    char     pad0[0x3];          // 0x11–0x13
+    int32_t  hiddenValue;        // 0x14
+    bool     inited;             // 0x18
+    bool     fakeValue;          // 0x19
+    bool     fakeValueActive;    // 0x1A
+    char     pad1[0x1];          // 0x1B
+};
+
+typedef ObscuredBool (*OpImplicitBool_t)(bool value);
+static OpImplicitBool_t ObscuredBool_OpImplicit;
+ObscuredBool BoolToObscuredBool(bool value) {
+    if (!ObscuredBool_OpImplicit) {
+        const char* args[1] = { "System.Boolean" };
+        void* addr = Il2Cpp::GetMethodOffset(
+                "ACTk.Runtime.dll",
+                "CodeStage.AntiCheat.ObscuredTypes",
+                "ObscuredBool",
+                "op_Implicit",
+                (char**)args,
+                1
+        );
+        ObscuredBool_OpImplicit = (OpImplicitBool_t)addr;
+    }
+    return ObscuredBool_OpImplicit(value);
+}
+
 void NoFog(void *instance) {
     void (*_Disable)(void *) = (void (*)(void *))(
             GetMethodOffset(
@@ -141,14 +170,10 @@ void PlayerUpdate(void *instance) {
 
 void (*_set_Cooldown)(void *instance, ObscuredFloat value);
 void set_Cooldown(void *instance, ObscuredFloat value) {
-    if(instance) {
-        if(noCoolDown) {
-            ObscuredFloat newCD = FloatToObscuredFloat(0.1);
-            return _set_Cooldown(instance, newCD);
-        } else {
-            _set_Cooldown(instance, value);
-        }
+    if(instance && noCoolDown) {
+        return _set_Cooldown(instance, FloatToObscuredFloat(0.06));
     }
+    _set_Cooldown(instance, value);
 }
 
 void CallEmergency(void *instance) {
@@ -166,11 +191,33 @@ void CallEmergency(void *instance) {
     }
 }
 
+void DoNoClip(void *instance, bool check) {
+    void (*_Behavior_set)(void *, bool) = (void (*)(void *, bool))(
+            GetMethodOffset(
+                    oxorany("UnityEngine.CoreModule.dll"),
+                    oxorany("UnityEngine"),
+                    oxorany("Behaviour"),
+                    oxorany("set_enabled"),
+                    1
+            )
+    );
+    if(_Behavior_set) {
+        _Behavior_set(instance, check);
+    }
+}
+
 void (*_CallUpdate)(void *instance);
 void CallUpdate(void *instance) {
-    if(instance && callBell) {
-        CallEmergency(instance);
-        callBell = false;
+    if(instance) {
+        if(callBell) {
+            CallEmergency(instance);
+            callBell = false;
+        }
+        void *adrr = *(void**)((uintptr_t) instance + playerCollider);
+        if(adrr) {
+            DoNoClip(adrr,!noClip);
+            AddDebugLog("playerCollider: %p",adrr);
+        }
     }
     _CallUpdate(instance);
 }
