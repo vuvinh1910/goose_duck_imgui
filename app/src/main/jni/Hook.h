@@ -18,15 +18,41 @@ int speed = 5, zoom = 1;
 bool noFog,noCoolDown,callBell,noClip;
 uintptr_t playerCollider;
 
-struct ObscuredInt {
-    int currentCryptoKey;    // 0x10
-    int hiddenValue;         // 0x14
-    bool inited;             // 0x18
-    char pad_0x19[0x3];      // padding để nhảy tới 0x1C
-    int fakeValue;           // 0x1C
-    bool fakeValueActive;    // 0x20
-    char pad_0x21[0x3];      // padding để nhảy tới 0x24
+#pragma pack(push, 4)
+
+struct ACTkByte4 {
+    uint8_t b1;
+    uint8_t b2;
+    uint8_t b3;
+    uint8_t b4;
 };
+
+struct ObscuredFloat {
+    int32_t currentCryptoKey;       // 0x10
+    int32_t hiddenValue;            // 0x14
+    ACTkByte4 hiddenValueOldByte4;  // 0x18
+    bool inited;                    // 0x1C
+    float fakeValue;                // 0x20
+    bool fakeValueActive;           // 0x24
+};
+
+struct ObscuredInt {
+    int32_t currentCryptoKey;   // 0x10
+    int32_t hiddenValue;        // 0x14
+    bool inited;                // 0x18
+    int32_t fakeValue;          // 0x1C
+    bool fakeValueActive;       // 0x20
+};
+
+struct ObscuredBool {
+    uint8_t currentCryptoKey;   // 0x10
+    int32_t hiddenValue;        // 0x14
+    bool inited;                // 0x18
+    bool fakeValue;             // 0x19
+    bool fakeValueActive;       // 0x1A
+};
+
+#pragma pack(pop)
 
 typedef ObscuredInt (*OpImplicit_t)(int value);
 static OpImplicit_t ObscuredInt_OpImplicit;
@@ -46,23 +72,6 @@ ObscuredInt IntToObscuredInt(int value) {
     return ObscuredInt_OpImplicit(value);
 }
 
-struct ACTkByte4 {
-    uint8_t b1;
-    uint8_t b2;
-    uint8_t b3;
-    uint8_t b4;
-};
-
-struct ObscuredFloat {
-    int32_t currentCryptoKey;    // 0x10
-    int32_t hiddenValue;         // 0x14
-    ACTkByte4 hiddenValueOldByte4; // 0x18
-    bool inited;                 // 0x1C
-    float fakeValue;             // 0x20
-    bool fakeValueActive;        // 0x24
-    char pad[3];                 // align lên 0x28
-};
-
 typedef ObscuredFloat (*OpImplicitFloat_t)(float value);
 static OpImplicitFloat_t ObscuredFloat_OpImplicit;
 ObscuredFloat FloatToObscuredFloat(float value) {
@@ -80,16 +89,6 @@ ObscuredFloat FloatToObscuredFloat(float value) {
     }
     return ObscuredFloat_OpImplicit(value);
 }
-
-struct ObscuredBool {
-    uint8_t  currentCryptoKey;   // 0x10
-    char     pad0[0x3];          // 0x11–0x13
-    int32_t  hiddenValue;        // 0x14
-    bool     inited;             // 0x18
-    bool     fakeValue;          // 0x19
-    bool     fakeValueActive;    // 0x1A
-    char     pad1[0x1];          // 0x1B
-};
 
 typedef ObscuredBool (*OpImplicitBool_t)(bool value);
 static OpImplicitBool_t ObscuredBool_OpImplicit;
@@ -216,7 +215,6 @@ void CallUpdate(void *instance) {
         void *adrr = *(void**)((uintptr_t) instance + playerCollider);
         if(adrr) {
             DoNoClip(adrr,!noClip);
-            AddDebugLog("playerCollider: %p",adrr);
         }
     }
     _CallUpdate(instance);
