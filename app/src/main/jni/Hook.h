@@ -15,8 +15,8 @@
 #endif
 
 int speed = 5, zoom = 1;
-bool noFog,noCoolDown,callBell,noClip,fastTask;
-uintptr_t playerCollider;
+bool noFog,noCoolDown,callBell,noClip,fastTask,alwayMove,closeVoting;
+uintptr_t playerCollider,disableMovement,vote1,vote2;
 
 #pragma pack(push, 4)
 
@@ -163,8 +163,39 @@ void PlayerUpdate(void *instance) {
                     &newSpeed
             );
         }
+        if(alwayMove) {
+            *(bool *) ((uintptr_t) instance + disableMovement) = false;
+            *(bool *) ((uintptr_t) instance + vote1) = false;
+            *(bool *) ((uintptr_t) instance + vote2) = false;
+        }
     }
     _PlayerUpdate(instance);
+}
+
+void DoCloseVoting(void *instance) {
+    void (*_CloseVoting)(void *) = (void (*)(void *))(
+            GetMethodOffset(
+                    oxorany("Assembly-CSharp.dll"),
+                    oxorany("Handlers.GameHandlers.VotingHandlers"),
+                    oxorany("VotingPanelHandler"),
+                    oxorany("ClosePanel"),
+                    0
+            )
+    );
+    if(_CloseVoting) {
+        _CloseVoting(instance);
+    }
+}
+
+void (*_VoteUpdate)(void *instance);
+void VoteUpdate(void *instance) {
+    if(instance) {
+        if(closeVoting) {
+            DoCloseVoting(instance);
+            closeVoting = false;
+        }
+    }
+    _VoteUpdate(instance);
 }
 
 void (*_set_Cooldown)(void *instance, ObscuredFloat value);
@@ -247,9 +278,11 @@ void CallUpdate(void *instance) {
             CallEmergency(instance);
             callBell = false;
         }
-        void *adrr = *(void**)((uintptr_t) instance + playerCollider);
-        if(adrr) {
-            DoNoClip(adrr,!noClip);
+        if(noClip) {
+            void *adrr = *(void**)((uintptr_t) instance + playerCollider);
+            if(adrr) {
+                DoNoClip(adrr, false);
+            }
         }
     }
     _CallUpdate(instance);
