@@ -15,7 +15,7 @@
 #endif
 
 int speed = 5, zoom = 1;
-bool noFog,noCoolDown,callBell,noClip;
+bool noFog,noCoolDown,callBell,noClip,fastTask;
 uintptr_t playerCollider;
 
 #pragma pack(push, 4)
@@ -173,6 +173,41 @@ void set_Cooldown(void *instance, ObscuredFloat value) {
         return _set_Cooldown(instance, FloatToObscuredFloat(0.06));
     }
     _set_Cooldown(instance, value);
+}
+
+void DoFastTask(void *instance) {
+    void (*_DoFastTask)(void *) = (void (*)(void *))(
+            GetMethodOffset(
+                    oxorany("Assembly-CSharp.dll"),
+                    oxorany("Handlers.GameHandlers.TaskHandlers"),
+                    oxorany("TaskPanelHandler"),
+                    oxorany("CompleteTask"),
+                    0
+            )
+    );
+    if(_DoFastTask) {
+        _DoFastTask(instance);
+    }
+    void (*_ClosePanel)(void *) = (void (*)(void *))(
+            GetMethodOffset(
+                    oxorany("Assembly-CSharp.dll"),
+                    oxorany("Handlers.GameHandlers.TaskHandlers"),
+                    oxorany("TaskPanelHandler"),
+                    oxorany("ClosePanel"),
+                    0
+            )
+    );
+    if(_ClosePanel) {
+        _ClosePanel(instance);
+    }
+}
+
+void (*_UpdatePanel)(void *instance);
+void UpdatePanel(void *instance) {
+    if(instance && fastTask) {
+        DoFastTask(instance);
+    }
+    _UpdatePanel(instance);
 }
 
 void CallEmergency(void *instance) {

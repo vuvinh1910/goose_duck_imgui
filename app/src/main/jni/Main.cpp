@@ -175,6 +175,7 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
 
             ImGui::Checkbox(oxorany("NoFog"), &noFog);
             ImGui::Checkbox(oxorany("NoClip"), &noClip);
+            ImGui::Checkbox(oxorany("FastTask"), &fastTask);
             ImGui::Checkbox(oxorany("NoCD"), &noCoolDown);
 
             if (ImGui::Button(oxorany("Call Emergency"))) {
@@ -241,6 +242,7 @@ void *Init_thread()
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.SpecialBehaviour"), oxorany("FogOfWar") , oxorany("FixedUpdate"), 0), (void *) FogUpdate , (void **) &_FogUpdate);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("LocalPlayer") , oxorany("FixedUpdate"), 0), (void *) PlayerUpdate , (void **) &_PlayerUpdate);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany(""), oxorany("UICooldownButton") , oxorany("set_Cooldown"), 1), (void *) set_Cooldown , (void **) &_set_Cooldown);
+    Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.TaskHandlers"), oxorany("TaskPanelHandler") , oxorany("OpenPanel"), 0), (void *) UpdatePanel , (void **) &_UpdatePanel);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayerController") , oxorany("Update"), 0), (void *) CallUpdate , (void **) &_CallUpdate);
 
     return nullptr;
