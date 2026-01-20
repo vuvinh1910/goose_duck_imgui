@@ -259,3 +259,28 @@ void CallUpdate(void *instance) {
     }
     _CallUpdate(instance);
 }
+
+void DoNoRoof(void *instance, bool check) {
+    void (*_DeactivateRoofs)(void *, bool) = (void (*)(void *, bool))(
+            GetMethodOffset(
+                    oxorany("Assembly-CSharp.dll"),
+                    oxorany("Handlers.GameHandlers"),
+                    oxorany("RoofHandler"),
+                    oxorany("DeactivateRoofs"),
+                    1
+            )
+    );
+    if(_DeactivateRoofs) {
+        _DeactivateRoofs(instance, check);
+    }
+}
+
+void (*_RoomUpdate)(void *instance, void *room);
+void RoomUpdate(void *instance, void *room) {
+    if(instance) {
+        if(NoFog) {
+            DoNoRoof(instance, false);
+        }
+    }
+    _RoomUpdate(instance, room);
+}
