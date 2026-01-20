@@ -136,7 +136,11 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
         ImGui::PopStyleColor();
 
         ImGui::PushStyleColor(ImGuiCol_Button, Tab == 2 ? active : inactive);
-        if (ImGui::Button(oxorany("Log"), ImVec2(120, 50))) Tab = 2;
+        if (ImGui::Button(oxorany("Spectator"), ImVec2(120, 50))) Tab = 2;
+        ImGui::PopStyleColor();
+
+        ImGui::PushStyleColor(ImGuiCol_Button, Tab == 3 ? active : inactive);
+        if (ImGui::Button(oxorany("Log"), ImVec2(120, 50))) Tab = 3;
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
 
@@ -169,6 +173,43 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
         }
 
         if (Tab == 2) {
+            static int selected_index = 0;
+            std::lock_guard<std::mutex> lock(g_TargetMutex);
+
+            if (targets.empty()) {
+                ImGui::Text(oxorany("Waiting for players..."));
+            } 
+            else {
+                std::vector<void*> playerList(targets.begin(), targets.end());
+
+                if (selected_index >= playerList.size()) selected_index = 0;
+
+                std::string preview = std::to_string(selected_index + 1);
+                
+                if (ImGui::BeginCombo(oxorany("Player ID"), preview.c_str())) {
+                    for (int i = 0; i < playerList.size(); i++) {
+                        const bool is_selected = (selected_index == i);
+                        std::string label = std::to_string(i + 1);
+
+                        if (ImGui::Selectable(label.c_str(), is_selected)) {
+                            selected_index = i;
+                        }
+                        if (is_selected) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+
+                ImGui::Spacing();
+
+                if (ImGui::Button(oxorany("DO_SPECTATOR"), ImVec2(-1, 50))) {
+                    if (spectator && playerList[selected_index]) {
+                        DoSpectator(spectator, playerList[selected_index], true);
+                    }
+                }
+            }
+        }
+
+        if (Tab == 3) {
             ImGui::Text(oxorany("Debug Logs:"));
             ImGui::BeginChild("DebugRegion", ImVec2(0, 400), true);
             for (auto& line : GetDebugLogs()) {
@@ -217,6 +258,9 @@ void *Init_thread()
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.TaskHandlers"), oxorany("TaskPanelHandler") , oxorany("OpenPanel"), 0), (void *) UpdatePanel , (void **) &_UpdatePanel);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayerController") , oxorany("Update"), 0), (void *) CallUpdate , (void **) &_CallUpdate);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers"), oxorany("RoofHandler") , oxorany("SetRoom"), 1), (void *) RoomUpdate , (void **) &_RoomUpdate);
+    Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers"), oxorany("SpectateHandler") , oxorany(".ctor"), 0), (void *) SpectatorCtor , (void **) &_SpectatorCtor);
+    Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayableEntity") , oxorany("OnDestroy"), 0), (void *) OnDestroyEntity , (void **) &_OnDestroyEntity);
+    Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayableEntity") , oxorany("Update"), 0), (void *) UpdateEntity , (void **) &_UpdateEntity);
 
     return nullptr;
 }

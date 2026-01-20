@@ -1,5 +1,9 @@
 #pragma once
 
+#include <set>
+#include <mutex>
+#include <vector>
+
 #if defined(__aarch64__)
 	auto RETURN = "CO 03 5F D6";
 	auto NOP = "1F 20 03 D5";
@@ -15,8 +19,11 @@
 #endif
 
 int speed = 5, zoom = 1;
-bool noFog,noCoolDown,callBell,noClip,fastTask,alwayMove;
+bool noFog,noCoolDown,callBell,noClip,fastTask,alwayMove,spectatorMode;
 uintptr_t playerCollider,disableMovement;
+void *spectator = nullptr;
+std::set<void*> targets;
+std::mutex g_TargetMutex;
 
 #pragma pack(push, 4)
 
@@ -279,8 +286,50 @@ void (*_RoomUpdate)(void *instance, void *room);
 void RoomUpdate(void *instance, void *room) {
     if(instance) {
         if(NoFog) {
-            DoNoRoof(instance, false);
+            DoNoRoof(instance, true);
         }
     }
     _RoomUpdate(instance, room);
+}
+
+void DoSpectator(void *instance, void *target, bool check) {
+    void (*_SetTarget)(void *, void *, bool) = (void (*)(void *, void *, bool))(
+            GetMethodOffset(
+                    oxorany("Assembly-CSharp.dll"),
+                    oxorany("Handlers.GameHandlers"),
+                    oxorany("SpectateHandler"),
+                    oxorany("Spectate"),
+                    2
+            )
+    );
+    if(_SetTarget) {
+        _SetTarget(instance, target, check);
+    }
+}
+
+void (*_SpectatorCtor)(void *instance);
+void SpectatorCtor(void *instance) {
+    if(instance) {
+        spectator = instance;
+        AddDebugLog("SpectatorCtor %p", instance);
+    }
+    _SpectatorCtor(instance);
+}
+
+void (*_OnDestroyEntity)(void *instance);
+void OnDestroyEntity(void *instance) {
+    if(instance) {
+        std::lock_guard<std::mutex> lock(g_TargetMutex);
+        targets.erase(instance);
+    }
+    _OnDestroyEntity(instance);
+}
+
+void (*_UpdateEntity)(void *instance);
+void UpdateEntity(void *instance) {
+    if(instance) {
+        std::lock_guard<std::mutex> lock(g_TargetMutex);
+        targets.insert(instance);
+    }
+    _UpdateEntity(instance);
 }
