@@ -5,6 +5,7 @@
 #include <mutex>
 #include <unordered_set>
 #include <atomic>
+#include "TuanMeta/IL2CppSDKGenerator/Vector3.h"
 
 #if defined(__aarch64__)
 	auto RETURN = "CO 03 5F D6";
@@ -43,6 +44,17 @@ static void* cachedSetEnabled = nullptr;
 static void* cachedDeactivateRoofs = nullptr;
 static void* cachedGetNickname = nullptr;
 static void* cachedSpectate = nullptr;
+static void* cachedIsLocal = nullptr;
+static void* cachedGetTransform = nullptr;
+static void* cachedGetPosition = nullptr;
+static void* cachedSetPosition = nullptr;
+
+// Local player pointer
+void* localPlayerPointer = nullptr;
+
+// Teleport request - defer to main thread
+std::atomic<int> pendingTeleportIndex{-1};
+std::atomic<bool> shouldDoTeleport{false};
 
 #pragma pack(push, 4)
 
@@ -370,6 +382,91 @@ void DoSpectator(void *instance, void *target, bool check) {
     }
 }
 
+bool IsLocalPlayer(void* entity) {
+    if(!entity) return false;
+    
+    if(!cachedIsLocal) {
+        cachedIsLocal = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.PlayerHandlers"),
+                oxorany("PlayableEntity"),
+                oxorany("get_IsLocal"),
+                0
+        );
+    }
+    if(cachedIsLocal) {
+        return ((bool (*)(void*))cachedIsLocal)(entity);
+    }
+    return false;
+}
+
+void* GetTransform(void* component) {
+    if(!component) return nullptr;
+    
+    if(!cachedGetTransform) {
+        cachedGetTransform = (void*)GetMethodOffset(
+                oxorany("UnityEngine.CoreModule.dll"),
+                oxorany("UnityEngine"),
+                oxorany("Component"),
+                oxorany("get_transform"),
+                0
+        );
+    }
+    if(cachedGetTransform) {
+        return ((void* (*)(void*))cachedGetTransform)(component);
+    }
+    return nullptr;
+}
+
+Vector3 GetPosition(void* transform) {
+    Vector3 pos = {0, 0, 0};
+    if(!transform) return pos;
+    
+    if(!cachedGetPosition) {
+        cachedGetPosition = (void*)GetMethodOffset(
+                oxorany("UnityEngine.CoreModule.dll"),
+                oxorany("UnityEngine"),
+                oxorany("Transform"),
+                oxorany("get_position"),
+                0
+        );
+    }
+    if(cachedGetPosition) {
+        pos = ((Vector3 (*)(void*))cachedGetPosition)(transform);
+    }
+    return pos;
+}
+
+void SetPosition(void* transform, Vector3 pos) {
+    if(!transform) return;
+    
+    if(!cachedSetPosition) {
+        cachedSetPosition = (void*)GetMethodOffset(
+                oxorany("UnityEngine.CoreModule.dll"),
+                oxorany("UnityEngine"),
+                oxorany("Transform"),
+                oxorany("set_position"),
+                1
+        );
+    }
+    if(cachedSetPosition) {
+        ((void (*)(void*, Vector3))cachedSetPosition)(transform, pos);
+    }
+}
+
+void DoTeleport(void* localPlayer, void* targetPlayer) {
+    if(!localPlayer || !targetPlayer) return;
+    
+    void* targetTransform = GetTransform(targetPlayer);
+    void* localTransform = GetTransform(localPlayer);
+    
+    if(targetTransform && localTransform) {
+        Vector3 targetPos = GetPosition(targetTransform);
+        SetPosition(localTransform, targetPos);
+        AddDebugLog("Teleported to %.2f, %.2f, %.2f", targetPos.x, targetPos.y, targetPos.z);
+    }
+}
+
 void (*_SpectatorCtor)(void *instance);
 void SpectatorCtor(void *instance) {
     if(instance) {
@@ -385,6 +482,10 @@ void OnDestroyEntity(void *instance) {
         std::lock_guard<std::mutex> lock(g_TargetMutex);
         targetsSet.clear();
         targetsList.clear();
+        
+        // Reset pointers when game ends (entities destroyed)
+        localPlayerPointer = nullptr;
+        spectatorPointer = nullptr;
     }
     _OnDestroyEntity(instance);
 }
@@ -394,6 +495,12 @@ void UpdateEntity(void *instance) {
     if(instance) {
         std::lock_guard<std::mutex> lock(g_TargetMutex);
         
+        // Capture local player pointer
+        if(!localPlayerPointer && IsLocalPlayer(instance)) {
+            localPlayerPointer = instance;
+            AddDebugLog("LocalPlayer found %p", localPlayerPointer);
+        }
+        
         // Execute pending spectate on main thread
         if(shouldDoSpectate.load() && spectatorPointer && pendingSpectateIndex.load() >= 0) {
             int idx = pendingSpectateIndex.load();
@@ -402,6 +509,16 @@ void UpdateEntity(void *instance) {
             }
             shouldDoSpectate.store(false);
             pendingSpectateIndex.store(-1);
+        }
+        
+        // Execute pending teleport on main thread
+        if(shouldDoTeleport.load() && localPlayerPointer && pendingTeleportIndex.load() >= 0) {
+            int idx = pendingTeleportIndex.load();
+            if(idx < (int)targetsList.size() && targetsList[idx]) {
+                DoTeleport(localPlayerPointer, targetsList[idx]);
+            }
+            shouldDoTeleport.store(false);
+            pendingTeleportIndex.store(-1);
         }
         
         // O(1) lookup with unordered_set

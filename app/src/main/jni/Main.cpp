@@ -206,6 +206,13 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
                     pendingSpectateIndex.store(selected_index);
                     shouldDoSpectate.store(true);
                 }
+
+                ImGui::Spacing();
+
+                if (ImGui::Button(oxorany("DO_TELEPORT"), ImVec2(-1, 50))) {
+                    pendingTeleportIndex.store(selected_index);
+                    shouldDoTeleport.store(true);
+                }
             }
         }
 
