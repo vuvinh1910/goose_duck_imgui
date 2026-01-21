@@ -174,22 +174,23 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
 
         if (Tab == 2) {
             static int selected_index = 0;
-            std::lock_guard<std::mutex> lock(g_TargetMutex);
+            
+            // Get thread-safe copy of targets
+            auto players = GetTargetsCopy();
 
-            if (targets.empty()) {
+            if (players.empty()) {
                 ImGui::Text(oxorany("Waiting for players..."));
             } 
             else {
-                std::vector<void*> playerList(targets.begin(), targets.end());
+                int size = (int)players.size();
+                if (selected_index >= size) selected_index = 0;
 
-                if (selected_index >= playerList.size()) selected_index = 0;
-
-                std::string preview = std::to_string(selected_index + 1);
+                std::string preview = GetNickname(players[selected_index]);
                 
-                if (ImGui::BeginCombo(oxorany("Player ID"), preview.c_str())) {
-                    for (int i = 0; i < playerList.size(); i++) {
+                if (ImGui::BeginCombo(oxorany("Select Player"), preview.c_str())) {
+                    for (int i = 0; i < size; i++) {
                         const bool is_selected = (selected_index == i);
-                        std::string label = std::to_string(i + 1);
+                        std::string label = std::to_string(i + 1) + ". " + GetNickname(players[i]);
 
                         if (ImGui::Selectable(label.c_str(), is_selected)) {
                             selected_index = i;
@@ -202,9 +203,8 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
                 ImGui::Spacing();
 
                 if (ImGui::Button(oxorany("DO_SPECTATOR"), ImVec2(-1, 50))) {
-                    if (spectator && playerList[selected_index]) {
-                        DoSpectator(spectator, playerList[selected_index], true);
-                    }
+                    pendingSpectateIndex.store(selected_index);
+                    shouldDoSpectate.store(true);
                 }
             }
         }

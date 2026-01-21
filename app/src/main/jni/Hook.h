@@ -1,8 +1,10 @@
 #pragma once
 
-#include <set>
-#include <mutex>
 #include <vector>
+#include <algorithm>
+#include <mutex>
+#include <unordered_set>
+#include <atomic>
 
 #if defined(__aarch64__)
 	auto RETURN = "CO 03 5F D6";
@@ -19,11 +21,28 @@
 #endif
 
 int speed = 5, zoom = 1;
-bool noFog,noCoolDown,callBell,noClip,fastTask,alwayMove,spectatorMode;
-uintptr_t playerCollider,disableMovement;
-void *spectator = nullptr;
-std::set<void*> targets;
+bool noFog, noCoolDown, callBell, noClip, fastTask, alwayMove, spectatorMode;
+uintptr_t playerCollider, disableMovement;
+void *spectatorPointer = nullptr;
+
+// Use unordered_set for O(1) lookup instead of vector O(n)
+std::unordered_set<void*> targetsSet;
+std::vector<void*> targetsList; // For UI display only
+
+std::atomic<int> pendingSpectateIndex{-1};
+std::atomic<bool> shouldDoSpectate{false};
 std::mutex g_TargetMutex;
+
+// Cached function pointers - avoid repeated GetMethodOffset calls
+static void* cachedDisableFog = nullptr;
+static void* cachedAdjustCamera = nullptr;
+static void* cachedCompleteTask = nullptr;
+static void* cachedClosePanel = nullptr;
+static void* cachedCallEmergency = nullptr;
+static void* cachedSetEnabled = nullptr;
+static void* cachedDeactivateRoofs = nullptr;
+static void* cachedGetNickname = nullptr;
+static void* cachedSpectate = nullptr;
 
 #pragma pack(push, 4)
 
@@ -35,28 +54,28 @@ struct ACTkByte4 {
 };
 
 struct ObscuredFloat {
-    int32_t currentCryptoKey;       // 0x10
-    int32_t hiddenValue;            // 0x14
-    ACTkByte4 hiddenValueOldByte4;  // 0x18
-    bool inited;                    // 0x1C
-    float fakeValue;                // 0x20
-    bool fakeValueActive;           // 0x24
+    int32_t currentCryptoKey;
+    int32_t hiddenValue;
+    ACTkByte4 hiddenValueOldByte4;
+    bool inited;
+    float fakeValue;
+    bool fakeValueActive;
 };
 
 struct ObscuredInt {
-    int32_t currentCryptoKey;   // 0x10
-    int32_t hiddenValue;        // 0x14
-    bool inited;                // 0x18
-    int32_t fakeValue;          // 0x1C
-    bool fakeValueActive;       // 0x20
+    int32_t currentCryptoKey;
+    int32_t hiddenValue;
+    bool inited;
+    int32_t fakeValue;
+    bool fakeValueActive;
 };
 
 struct ObscuredBool {
-    uint8_t currentCryptoKey;   // 0x10
-    int32_t hiddenValue;        // 0x14
-    bool inited;                // 0x18
-    bool fakeValue;             // 0x19
-    bool fakeValueActive;       // 0x1A
+    uint8_t currentCryptoKey;
+    int32_t hiddenValue;
+    bool inited;
+    bool fakeValue;
+    bool fakeValueActive;
 };
 
 #pragma pack(pop)
@@ -115,33 +134,34 @@ ObscuredBool BoolToObscuredBool(bool value) {
     return ObscuredBool_OpImplicit(value);
 }
 
+// Cached version - only lookup once
 void NoFog(void *instance) {
-    void (*_Disable)(void *) = (void (*)(void *))(
-            GetMethodOffset(
-                    oxorany("Assembly-CSharp.dll"),
-                    oxorany("Handlers.GameHandlers.SpecialBehaviour"),
-                    oxorany("FogOfWar"),
-                    oxorany("Disable"),
-                    0
-            )
-    );
-    if(_Disable) {
-        _Disable(instance);
+    if(!cachedDisableFog) {
+        cachedDisableFog = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.SpecialBehaviour"),
+                oxorany("FogOfWar"),
+                oxorany("Disable"),
+                0
+        );
+    }
+    if(cachedDisableFog) {
+        ((void (*)(void *))cachedDisableFog)(instance);
     }
 }
 
 void AdjustCamera(void *instance, float value) {
-    void (*_OverrideOrthographicSize)(void *, float) = (void (*)(void *, float))(
-            GetMethodOffset(
-                    oxorany("Assembly-CSharp.dll"),
-                    oxorany("Handlers.GameHandlers.PlayerHandlers"),
-                    oxorany("LocalPlayer"),
-                    oxorany("OverrideOrthographicSize"),
-                    1
-            )
-    );
-    if(_OverrideOrthographicSize) {
-        _OverrideOrthographicSize(instance, value);
+    if(!cachedAdjustCamera) {
+        cachedAdjustCamera = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.PlayerHandlers"),
+                oxorany("LocalPlayer"),
+                oxorany("OverrideOrthographicSize"),
+                1
+        );
+    }
+    if(cachedAdjustCamera) {
+        ((void (*)(void *, float))cachedAdjustCamera)(instance, value);
     }
 }
 
@@ -157,11 +177,10 @@ void (*_PlayerUpdate)(void *instance);
 void PlayerUpdate(void *instance) {
     if(instance) {
         if(zoom > 1) {
-            AdjustCamera(instance,(float)zoom);
+            AdjustCamera(instance, (float)zoom);
         }
         if(speed >= 5) {
             ObscuredFloat newSpeed = FloatToObscuredFloat(speed);
-            // edit static field.
             Il2Cpp::SetStaticFieldValue(
                     "Assembly-CSharp.dll",
                     "Handlers.GameHandlers.PlayerHandlers",
@@ -171,7 +190,7 @@ void PlayerUpdate(void *instance) {
             );
         }
         if(alwayMove) {
-            *(bool *) ((uintptr_t) instance + disableMovement) = false;
+            *(bool *)((uintptr_t)instance + disableMovement) = false;
         }
     }
     _PlayerUpdate(instance);
@@ -186,29 +205,29 @@ void set_Cooldown(void *instance, ObscuredFloat value) {
 }
 
 void DoFastTask(void *instance) {
-    void (*_DoFastTask)(void *) = (void (*)(void *))(
-            GetMethodOffset(
-                    oxorany("Assembly-CSharp.dll"),
-                    oxorany("Handlers.GameHandlers.TaskHandlers"),
-                    oxorany("TaskPanelHandler"),
-                    oxorany("CompleteTask"),
-                    0
-            )
-    );
-    if(_DoFastTask) {
-        _DoFastTask(instance);
+    if(!cachedCompleteTask) {
+        cachedCompleteTask = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.TaskHandlers"),
+                oxorany("TaskPanelHandler"),
+                oxorany("CompleteTask"),
+                0
+        );
     }
-    void (*_ClosePanel)(void *) = (void (*)(void *))(
-            GetMethodOffset(
-                    oxorany("Assembly-CSharp.dll"),
-                    oxorany("Handlers.GameHandlers.TaskHandlers"),
-                    oxorany("TaskPanelHandler"),
-                    oxorany("ClosePanel"),
-                    0
-            )
-    );
-    if(_ClosePanel) {
-        _ClosePanel(instance);
+    if(!cachedClosePanel) {
+        cachedClosePanel = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.TaskHandlers"),
+                oxorany("TaskPanelHandler"),
+                oxorany("ClosePanel"),
+                0
+        );
+    }
+    if(cachedCompleteTask) {
+        ((void (*)(void *))cachedCompleteTask)(instance);
+    }
+    if(cachedClosePanel) {
+        ((void (*)(void *))cachedClosePanel)(instance);
     }
 }
 
@@ -221,32 +240,32 @@ void UpdatePanel(void *instance) {
 }
 
 void CallEmergency(void *instance) {
-    void (*_CallEmergency)(void *) = (void (*)(void *))(
-            GetMethodOffset(
-                    oxorany("Assembly-CSharp.dll"),
-                    oxorany("Handlers.GameHandlers.PlayerHandlers"),
-                    oxorany("PlayerController"),
-                    oxorany("CallEmergency"),
-                    0
-            )
-    );
-    if(_CallEmergency) {
-        _CallEmergency(instance);
+    if(!cachedCallEmergency) {
+        cachedCallEmergency = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.PlayerHandlers"),
+                oxorany("PlayerController"),
+                oxorany("CallEmergency"),
+                0
+        );
+    }
+    if(cachedCallEmergency) {
+        ((void (*)(void *))cachedCallEmergency)(instance);
     }
 }
 
 void DoNoClip(void *instance, bool check) {
-    void (*_Behavior_set)(void *, bool) = (void (*)(void *, bool))(
-            GetMethodOffset(
-                    oxorany("UnityEngine.CoreModule.dll"),
-                    oxorany("UnityEngine"),
-                    oxorany("Behaviour"),
-                    oxorany("set_enabled"),
-                    1
-            )
-    );
-    if(_Behavior_set) {
-        _Behavior_set(instance, check);
+    if(!cachedSetEnabled) {
+        cachedSetEnabled = (void*)GetMethodOffset(
+                oxorany("UnityEngine.CoreModule.dll"),
+                oxorany("UnityEngine"),
+                oxorany("Behaviour"),
+                oxorany("set_enabled"),
+                1
+        );
+    }
+    if(cachedSetEnabled) {
+        ((void (*)(void *, bool))cachedSetEnabled)(instance, check);
     }
 }
 
@@ -258,9 +277,9 @@ void CallUpdate(void *instance) {
             callBell = false;
         }
         if(noClip) {
-            void *adrr = *(void**)((uintptr_t) instance + playerCollider);
-            if(adrr) {
-                DoNoClip(adrr, false);
+            void *addr = *(void**)((uintptr_t)instance + playerCollider);
+            if(addr) {
+                DoNoClip(addr, false);
             }
         }
     }
@@ -268,50 +287,94 @@ void CallUpdate(void *instance) {
 }
 
 void DoNoRoof(void *instance, bool check) {
-    void (*_DeactivateRoofs)(void *, bool) = (void (*)(void *, bool))(
-            GetMethodOffset(
-                    oxorany("Assembly-CSharp.dll"),
-                    oxorany("Handlers.GameHandlers"),
-                    oxorany("RoofHandler"),
-                    oxorany("DeactivateRoofs"),
-                    1
-            )
-    );
-    if(_DeactivateRoofs) {
-        _DeactivateRoofs(instance, check);
+    if(!cachedDeactivateRoofs) {
+        cachedDeactivateRoofs = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers"),
+                oxorany("RoofHandler"),
+                oxorany("DeactivateRoofs"),
+                1
+        );
+    }
+    if(cachedDeactivateRoofs) {
+        ((void (*)(void *, bool))cachedDeactivateRoofs)(instance, check);
     }
 }
 
 void (*_RoomUpdate)(void *instance, void *room);
 void RoomUpdate(void *instance, void *room) {
     if(instance) {
-        if(NoFog) {
+        if(noFog) {
             DoNoRoof(instance, true);
         }
     }
     _RoomUpdate(instance, room);
 }
 
+std::string GetNickname(void *entity) {
+    if(!entity) return "Unknown";
+    
+    if(!cachedGetNickname) {
+        cachedGetNickname = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.PlayerHandlers"),
+                oxorany("PlayableEntity"),
+                oxorany("get_Nickname"),
+                0
+        );
+    }
+    
+    if(cachedGetNickname) {
+        void* monoString = ((void* (*)(void *))cachedGetNickname)(entity);
+        if(monoString) {
+            auto chars = (uint16_t*)((uintptr_t)monoString + 0x14);
+            int len = *(int*)((uintptr_t)monoString + 0x10);
+            
+            // Pre-reserve to avoid reallocations
+            std::string result;
+            result.reserve(len * 3);
+            
+            for(int i = 0; i < len; i++) {
+                uint16_t ch = chars[i];
+                if(ch < 0x80) {
+                    result += (char)ch;
+                } 
+                else if(ch < 0x800) {
+                    result += (char)(0xC0 | (ch >> 6));
+                    result += (char)(0x80 | (ch & 0x3F));
+                } 
+                else {
+                    result += (char)(0xE0 | (ch >> 12));
+                    result += (char)(0x80 | ((ch >> 6) & 0x3F));
+                    result += (char)(0x80 | (ch & 0x3F));
+                }
+            }
+            return result;
+        }
+    }
+    return "Unknown";
+}
+
 void DoSpectator(void *instance, void *target, bool check) {
-    void (*_SetTarget)(void *, void *, bool) = (void (*)(void *, void *, bool))(
-            GetMethodOffset(
-                    oxorany("Assembly-CSharp.dll"),
-                    oxorany("Handlers.GameHandlers"),
-                    oxorany("SpectateHandler"),
-                    oxorany("Spectate"),
-                    2
-            )
-    );
-    if(_SetTarget) {
-        _SetTarget(instance, target, check);
+    if(!cachedSpectate) {
+        cachedSpectate = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers"),
+                oxorany("SpectateHandler"),
+                oxorany("Spectate"),
+                2
+        );
+    }
+    if(cachedSpectate && instance && target) {
+        ((void (*)(void *, void *, bool))cachedSpectate)(instance, target, check);
     }
 }
 
 void (*_SpectatorCtor)(void *instance);
 void SpectatorCtor(void *instance) {
     if(instance) {
-        spectator = instance;
-        AddDebugLog("SpectatorCtor %p", instance);
+        spectatorPointer = instance;
+        AddDebugLog("SpectatorCtor %p", spectatorPointer);
     }
     _SpectatorCtor(instance);
 }
@@ -320,7 +383,8 @@ void (*_OnDestroyEntity)(void *instance);
 void OnDestroyEntity(void *instance) {
     if(instance) {
         std::lock_guard<std::mutex> lock(g_TargetMutex);
-        targets.erase(instance);
+        targetsSet.clear();
+        targetsList.clear();
     }
     _OnDestroyEntity(instance);
 }
@@ -329,7 +393,28 @@ void (*_UpdateEntity)(void *instance);
 void UpdateEntity(void *instance) {
     if(instance) {
         std::lock_guard<std::mutex> lock(g_TargetMutex);
-        targets.insert(instance);
+        
+        // Execute pending spectate on main thread
+        if(shouldDoSpectate.load() && spectatorPointer && pendingSpectateIndex.load() >= 0) {
+            int idx = pendingSpectateIndex.load();
+            if(idx < (int)targetsList.size() && targetsList[idx]) {
+                DoSpectator(spectatorPointer, targetsList[idx], true);
+            }
+            shouldDoSpectate.store(false);
+            pendingSpectateIndex.store(-1);
+        }
+        
+        // O(1) lookup with unordered_set
+        if(targetsSet.find(instance) == targetsSet.end()) {
+            targetsSet.insert(instance);
+            targetsList.push_back(instance);
+        }
     }
     _UpdateEntity(instance);
+}
+
+// Helper to get targets for UI (thread-safe copy)
+std::vector<void*> GetTargetsCopy() {
+    std::lock_guard<std::mutex> lock(g_TargetMutex);
+    return targetsList;
 }
