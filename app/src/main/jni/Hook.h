@@ -46,6 +46,7 @@ static void* cachedIsLocal = nullptr;
 static void* cachedGetTransform = nullptr;
 static void* cachedGetPosition = nullptr;
 static void* cachedSetPosition = nullptr;
+static void* cachedHasKilledThisRound = nullptr;
 
 // Local player pointer
 void* localPlayerPointer = nullptr;
@@ -496,35 +497,71 @@ std::vector<void*> GetTargetsCopy() {
     return targetsList;
 }
 
-float CalculateDistance(Vector3 a, Vector3 b) {
+// Use squared distance to avoid expensive sqrtf - for comparison only
+inline float CalculateDistanceSquared(Vector3 a, Vector3 b) {
     float dx = a.x - b.x;
     float dy = a.y - b.y;
     float dz = a.z - b.z;
-    return sqrtf(dx * dx + dy * dy + dz * dz);
+    return dx * dx + dy * dy + dz * dz;
 }
 
-void* FindNearestPlayer(void* deadEntity, Vector3 deadPos) {
-    void* nearestPlayer = nullptr;
-    float minDistance = FLT_MAX;
+// Real distance when needed for display
+inline float CalculateDistance(Vector3 a, Vector3 b) {
+    return sqrtf(CalculateDistanceSquared(a, b));
+}
+
+struct NearestResult {
+    void* player;
+    float distanceSquared;
+};
+
+// Optimized: Copy list quickly, release mutex, then do expensive IL2CPP calls
+NearestResult FindNearestPlayer(void* deadEntity, Vector3 deadPos) {
+    NearestResult result = {nullptr, FLT_MAX};
     
-    std::lock_guard<std::mutex> lock(g_TargetMutex);
+    // Quick copy under lock - minimize lock time
+    std::vector<void*> playersCopy;
+    {
+        std::lock_guard<std::mutex> lock(g_TargetMutex);
+        playersCopy = targetsList;
+    }
     
-    for(void* entity : targetsList) {
+    // Now iterate without holding lock - IL2CPP calls are slow
+    for(void* entity : playersCopy) {
         if(entity == deadEntity || entity == nullptr) continue;
         
         void* transform = GetTransform(entity);
         if(!transform) continue;
         
         Vector3 entityPos = GetPosition(transform);
-        float distance = CalculateDistance(deadPos, entityPos);
+        float distSq = CalculateDistanceSquared(deadPos, entityPos);
         
-        if(distance < minDistance) {
-            minDistance = distance;
-            nearestPlayer = entity;
+        // Compare squared distances - no sqrt needed
+        if(distSq < result.distanceSquared) {
+            result.distanceSquared = distSq;
+            result.player = entity;
         }
     }
     
-    return nearestPlayer;
+    return result;
+}
+
+bool HasKilledThisRound(void* entity) {
+    if(!entity) return false;
+    
+    if(!cachedHasKilledThisRound) {
+        cachedHasKilledThisRound = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.PlayerHandlers"),
+                oxorany("PlayableEntity"),
+                oxorany("get_HasKilledThisRound"),
+                0
+        );
+    }
+    if(cachedHasKilledThisRound) {
+        return ((bool (*)(void*))cachedHasKilledThisRound)(entity);
+    }
+    return false;
 }
 
 void (*_TurnIntoGhost)(void *instance, int deathReason);
@@ -536,12 +573,27 @@ void TurnIntoGhost(void *instance, int deathReason) {
         if(deadTransform) {
             Vector3 deadPos = GetPosition(deadTransform);
             
-            void* nearestPlayer = FindNearestPlayer(instance, deadPos);
+            NearestResult nearest = FindNearestPlayer(instance, deadPos);
             
-            if(nearestPlayer) {
-                std::string nearestName = GetNickname(nearestPlayer);
-                AddDebugLog("[DEATH] %s died! Nearest player: %s", 
-                    deadPlayerName.c_str(), nearestName.c_str());
+            if(nearest.player) {
+                // Validate pointer is still in our list before using
+                bool stillValid = false;
+                {
+                    std::lock_guard<std::mutex> lock(g_TargetMutex);
+                    stillValid = (targetsSet.find(nearest.player) != targetsSet.end());
+                }
+                
+                if(stillValid) {
+                    std::string nearestName = GetNickname(nearest.player);
+                    bool hasKilled = HasKilledThisRound(nearest.player);
+                    float realDistance = sqrtf(nearest.distanceSquared);
+                    AddDebugLog("[DEATH] %s died! Nearest: %s (%.1f) | Kill: %s", 
+                        deadPlayerName.c_str(), nearestName.c_str(), realDistance,
+                        hasKilled ? "Yes" : "No");
+                } else {
+                    AddDebugLog("[DEATH] %s died! (Nearest player left)", 
+                        deadPlayerName.c_str());
+                }
             } else {
                 AddDebugLog("[DEATH] %s died! No nearby players found.", 
                     deadPlayerName.c_str());
