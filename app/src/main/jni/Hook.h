@@ -5,6 +5,8 @@
 #include <mutex>
 #include <unordered_set>
 #include <atomic>
+#include <float.h>
+#include <math.h>
 #include "TuanMeta/IL2CppSDKGenerator/Vector3.h"
 
 #if defined(__aarch64__)
@@ -24,14 +26,11 @@
 int speed = 5, zoom = 1;
 bool noFog, noCoolDown, callBell, noClip, fastTask, alwayMove, spectatorMode;
 uintptr_t playerCollider, disableMovement;
-void *spectatorPointer = nullptr;
 
 // Use unordered_set for O(1) lookup instead of vector O(n)
 std::unordered_set<void*> targetsSet;
 std::vector<void*> targetsList; // For UI display only
 
-std::atomic<int> pendingSpectateIndex{-1};
-std::atomic<bool> shouldDoSpectate{false};
 std::mutex g_TargetMutex;
 
 // Cached function pointers - avoid repeated GetMethodOffset calls
@@ -43,7 +42,6 @@ static void* cachedCallEmergency = nullptr;
 static void* cachedSetEnabled = nullptr;
 static void* cachedDeactivateRoofs = nullptr;
 static void* cachedGetNickname = nullptr;
-static void* cachedSpectate = nullptr;
 static void* cachedIsLocal = nullptr;
 static void* cachedGetTransform = nullptr;
 static void* cachedGetPosition = nullptr;
@@ -367,21 +365,6 @@ std::string GetNickname(void *entity) {
     return "Unknown";
 }
 
-void DoSpectator(void *instance, void *target, bool check) {
-    if(!cachedSpectate) {
-        cachedSpectate = (void*)GetMethodOffset(
-                oxorany("Assembly-CSharp.dll"),
-                oxorany("Handlers.GameHandlers"),
-                oxorany("SpectateHandler"),
-                oxorany("Spectate"),
-                2
-        );
-    }
-    if(cachedSpectate && instance && target) {
-        ((void (*)(void *, void *, bool))cachedSpectate)(instance, target, check);
-    }
-}
-
 bool IsLocalPlayer(void* entity) {
     if(!entity) return false;
     
@@ -463,17 +446,7 @@ void DoTeleport(void* localPlayer, void* targetPlayer) {
     if(targetTransform && localTransform) {
         Vector3 targetPos = GetPosition(targetTransform);
         SetPosition(localTransform, targetPos);
-        AddDebugLog("Teleported to %.2f, %.2f, %.2f", targetPos.x, targetPos.y, targetPos.z);
     }
-}
-
-void (*_SpectatorCtor)(void *instance);
-void SpectatorCtor(void *instance) {
-    if(instance) {
-        spectatorPointer = instance;
-        AddDebugLog("SpectatorCtor %p", spectatorPointer);
-    }
-    _SpectatorCtor(instance);
 }
 
 void (*_OnDestroyEntity)(void *instance);
@@ -485,7 +458,6 @@ void OnDestroyEntity(void *instance) {
         
         // Reset pointers when game ends (entities destroyed)
         localPlayerPointer = nullptr;
-        spectatorPointer = nullptr;
     }
     _OnDestroyEntity(instance);
 }
@@ -498,17 +470,6 @@ void UpdateEntity(void *instance) {
         // Capture local player pointer
         if(!localPlayerPointer && IsLocalPlayer(instance)) {
             localPlayerPointer = instance;
-            AddDebugLog("LocalPlayer found %p", localPlayerPointer);
-        }
-        
-        // Execute pending spectate on main thread
-        if(shouldDoSpectate.load() && spectatorPointer && pendingSpectateIndex.load() >= 0) {
-            int idx = pendingSpectateIndex.load();
-            if(idx < (int)targetsList.size() && targetsList[idx]) {
-                DoSpectator(spectatorPointer, targetsList[idx], false);
-            }
-            shouldDoSpectate.store(false);
-            pendingSpectateIndex.store(-1);
         }
         
         // Execute pending teleport on main thread
@@ -530,8 +491,65 @@ void UpdateEntity(void *instance) {
     _UpdateEntity(instance);
 }
 
-// Helper to get targets for UI (thread-safe copy)
 std::vector<void*> GetTargetsCopy() {
     std::lock_guard<std::mutex> lock(g_TargetMutex);
     return targetsList;
+}
+
+float CalculateDistance(Vector3 a, Vector3 b) {
+    float dx = a.x - b.x;
+    float dy = a.y - b.y;
+    float dz = a.z - b.z;
+    return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+
+void* FindNearestPlayer(void* deadEntity, Vector3 deadPos) {
+    void* nearestPlayer = nullptr;
+    float minDistance = FLT_MAX;
+    
+    std::lock_guard<std::mutex> lock(g_TargetMutex);
+    
+    for(void* entity : targetsList) {
+        if(entity == deadEntity || entity == nullptr) continue;
+        
+        void* transform = GetTransform(entity);
+        if(!transform) continue;
+        
+        Vector3 entityPos = GetPosition(transform);
+        float distance = CalculateDistance(deadPos, entityPos);
+        
+        if(distance < minDistance) {
+            minDistance = distance;
+            nearestPlayer = entity;
+        }
+    }
+    
+    return nearestPlayer;
+}
+
+void (*_TurnIntoGhost)(void *instance, int deathReason);
+void TurnIntoGhost(void *instance, int deathReason) {
+    if(instance) {
+        std::string deadPlayerName = GetNickname(instance);
+        
+        void* deadTransform = GetTransform(instance);
+        if(deadTransform) {
+            Vector3 deadPos = GetPosition(deadTransform);
+            
+            void* nearestPlayer = FindNearestPlayer(instance, deadPos);
+            
+            if(nearestPlayer) {
+                std::string nearestName = GetNickname(nearestPlayer);
+                AddDebugLog("[DEATH] %s died! Nearest player: %s", 
+                    deadPlayerName.c_str(), nearestName.c_str());
+            } else {
+                AddDebugLog("[DEATH] %s died! No nearby players found.", 
+                    deadPlayerName.c_str());
+            }
+        } else {
+            AddDebugLog("[DEATH] %s died! (Could not get position)", 
+                deadPlayerName.c_str());
+        }
+    }
+    _TurnIntoGhost(instance, deathReason);
 }

@@ -202,13 +202,6 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
 
                 ImGui::Spacing();
 
-                if (ImGui::Button(oxorany("DO_SPECTATOR"), ImVec2(-1, 50))) {
-                    pendingSpectateIndex.store(selected_index);
-                    shouldDoSpectate.store(true);
-                }
-
-                ImGui::Spacing();
-
                 if (ImGui::Button(oxorany("DO_TELEPORT"), ImVec2(-1, 50))) {
                     pendingTeleportIndex.store(selected_index);
                     shouldDoTeleport.store(true);
@@ -265,9 +258,9 @@ void *Init_thread()
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.TaskHandlers"), oxorany("TaskPanelHandler") , oxorany("OpenPanel"), 0), (void *) UpdatePanel , (void **) &_UpdatePanel);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayerController") , oxorany("Update"), 0), (void *) CallUpdate , (void **) &_CallUpdate);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers"), oxorany("RoofHandler") , oxorany("SetRoom"), 1), (void *) RoomUpdate , (void **) &_RoomUpdate);
-    Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers"), oxorany("SpectateHandler") , oxorany(".ctor"), 0), (void *) SpectatorCtor , (void **) &_SpectatorCtor);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayableEntity") , oxorany("OnDestroy"), 0), (void *) OnDestroyEntity , (void **) &_OnDestroyEntity);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayableEntity") , oxorany("Update"), 0), (void *) UpdateEntity , (void **) &_UpdateEntity);
+    Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("PlayableEntity") , oxorany("TurnIntoGhost"), 1), (void *) TurnIntoGhost , (void **) &_TurnIntoGhost);
 
     return nullptr;
 }
