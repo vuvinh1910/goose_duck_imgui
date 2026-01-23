@@ -505,7 +505,7 @@ void UpdateEntity(void *instance) {
         if(shouldDoSpectate.load() && spectatorPointer && pendingSpectateIndex.load() >= 0) {
             int idx = pendingSpectateIndex.load();
             if(idx < (int)targetsList.size() && targetsList[idx]) {
-                DoSpectator(spectatorPointer, targetsList[idx], true);
+                DoSpectator(spectatorPointer, targetsList[idx], false);
             }
             shouldDoSpectate.store(false);
             pendingSpectateIndex.store(-1);
