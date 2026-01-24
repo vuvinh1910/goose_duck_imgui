@@ -46,7 +46,8 @@ static void* cachedIsLocal = nullptr;
 static void* cachedGetTransform = nullptr;
 static void* cachedGetPosition = nullptr;
 static void* cachedSetPosition = nullptr;
-static void* cachedHasKilledThisRound = nullptr;
+static void* cachedSetCameraFollow = nullptr;
+
 
 // Local player pointer
 void* localPlayerPointer = nullptr;
@@ -54,6 +55,10 @@ void* localPlayerPointer = nullptr;
 // Teleport request - defer to main thread
 std::atomic<int> pendingTeleportIndex{-1};
 std::atomic<bool> shouldDoTeleport{false};
+
+// Spectator request - defer to main thread
+std::atomic<int> pendingSpectatorIndex{-1};
+std::atomic<bool> shouldDoSpectator{false};
 
 #pragma pack(push, 4)
 
@@ -183,30 +188,6 @@ void FogUpdate(void *instance) {
     }
     _FogUpdate(instance);
 }
-
-void (*_PlayerUpdate)(void *instance);
-void PlayerUpdate(void *instance) {
-    if(instance) {
-        if(zoom > 1) {
-            AdjustCamera(instance, (float)zoom);
-        }
-        if(speed >= 5) {
-            ObscuredFloat newSpeed = FloatToObscuredFloat(speed);
-            Il2Cpp::SetStaticFieldValue(
-                    "Assembly-CSharp.dll",
-                    "Handlers.GameHandlers.PlayerHandlers",
-                    "LocalPlayer",
-                    "movementSpeed",
-                    &newSpeed
-            );
-        }
-        if(alwayMove) {
-            *(bool *)((uintptr_t)instance + disableMovement) = false;
-        }
-    }
-    _PlayerUpdate(instance);
-}
-
 void (*_set_Cooldown)(void *instance, ObscuredFloat value);
 void set_Cooldown(void *instance, ObscuredFloat value) {
     if(instance && noCoolDown) {
@@ -402,6 +383,65 @@ void* GetTransform(void* component) {
     return nullptr;
 }
 
+void DoSpectator(void* localPlayerInstance, void* targetPlayer) {
+    if(!localPlayerInstance || !targetPlayer) return;
+    
+    if(!cachedSetCameraFollow) {
+        cachedSetCameraFollow = (void*)GetMethodOffset(
+                oxorany("Assembly-CSharp.dll"),
+                oxorany("Handlers.GameHandlers.PlayerHandlers"),
+                oxorany("LocalPlayer"),
+                oxorany("SetCameraFollow"),
+                1
+        );
+    }
+    
+    if(cachedSetCameraFollow) {
+        void* targetTransform = GetTransform(targetPlayer);
+        if(targetTransform) {
+            ((void (*)(void*, void*))cachedSetCameraFollow)(localPlayerInstance, targetTransform);
+        }
+    }
+}
+
+void (*_PlayerUpdate)(void *instance);
+void PlayerUpdate(void *instance) {
+    if(instance) {
+        // Handle spectator request
+        if(shouldDoSpectator.load() && pendingSpectatorIndex.load() >= 0) {
+            std::vector<void*> playersCopy;
+            {
+                std::lock_guard<std::mutex> lock(g_TargetMutex);
+                playersCopy = targetsList;
+            }
+            int idx = pendingSpectatorIndex.load();
+            if(idx < (int)playersCopy.size() && playersCopy[idx]) {
+                DoSpectator(instance, playersCopy[idx]);
+            }
+            shouldDoSpectator.store(false);
+            pendingSpectatorIndex.store(-1);
+        }
+        
+        if(zoom > 1) {
+            AdjustCamera(instance, (float)zoom);
+        }
+        if(speed >= 5) {
+            ObscuredFloat newSpeed = FloatToObscuredFloat(speed);
+            Il2Cpp::SetStaticFieldValue(
+                    "Assembly-CSharp.dll",
+                    "Handlers.GameHandlers.PlayerHandlers",
+                    "LocalPlayer",
+                    "movementSpeed",
+                    &newSpeed
+            );
+        }
+        if(alwayMove) {
+            *(bool *)((uintptr_t)instance + disableMovement) = false;
+        }
+    }
+    _PlayerUpdate(instance);
+}
+
 Vector3 GetPosition(void* transform) {
     Vector3 pos = {0, 0, 0};
     if(!transform) return pos;
@@ -510,14 +550,16 @@ inline float CalculateDistance(Vector3 a, Vector3 b) {
     return sqrtf(CalculateDistanceSquared(a, b));
 }
 
-struct NearestResult {
+struct NearbyPlayerInfo {
     void* player;
-    float distanceSquared;
+    float distance;
+    std::string name;
 };
 
-// Optimized: Copy list quickly, release mutex, then do expensive IL2CPP calls
-NearestResult FindNearestPlayer(void* deadEntity, Vector3 deadPos) {
-    NearestResult result = {nullptr, FLT_MAX};
+// Find all players within specified range
+std::vector<NearbyPlayerInfo> FindPlayersInRange(void* deadEntity, Vector3 deadPos, float maxDistance) {
+    std::vector<NearbyPlayerInfo> result;
+    float maxDistSq = maxDistance * maxDistance;
     
     // Quick copy under lock - minimize lock time
     std::vector<void*> playersCopy;
@@ -536,33 +578,25 @@ NearestResult FindNearestPlayer(void* deadEntity, Vector3 deadPos) {
         Vector3 entityPos = GetPosition(transform);
         float distSq = CalculateDistanceSquared(deadPos, entityPos);
         
-        // Compare squared distances - no sqrt needed
-        if(distSq < result.distanceSquared) {
-            result.distanceSquared = distSq;
-            result.player = entity;
+        // Check if within range
+        if(distSq <= maxDistSq) {
+            NearbyPlayerInfo info;
+            info.player = entity;
+            info.distance = sqrtf(distSq);
+            info.name = GetNickname(entity);
+            result.push_back(info);
         }
     }
+    
+    // Sort by distance (closest first)
+    std::sort(result.begin(), result.end(), [](const NearbyPlayerInfo& a, const NearbyPlayerInfo& b) {
+        return a.distance < b.distance;
+    });
     
     return result;
 }
 
-bool HasKilledThisRound(void* entity) {
-    if(!entity) return false;
-    
-    if(!cachedHasKilledThisRound) {
-        cachedHasKilledThisRound = (void*)GetMethodOffset(
-                oxorany("Assembly-CSharp.dll"),
-                oxorany("Handlers.GameHandlers.PlayerHandlers"),
-                oxorany("PlayableEntity"),
-                oxorany("get_HasKilledThisRound"),
-                0
-        );
-    }
-    if(cachedHasKilledThisRound) {
-        return ((bool (*)(void*))cachedHasKilledThisRound)(entity);
-    }
-    return false;
-}
+
 
 void (*_TurnIntoGhost)(void *instance, int deathReason);
 void TurnIntoGhost(void *instance, int deathReason) {
@@ -573,29 +607,24 @@ void TurnIntoGhost(void *instance, int deathReason) {
         if(deadTransform) {
             Vector3 deadPos = GetPosition(deadTransform);
             
-            NearestResult nearest = FindNearestPlayer(instance, deadPos);
+            // Find all players within 3.0 distance
+            std::vector<NearbyPlayerInfo> nearbyPlayers = FindPlayersInRange(instance, deadPos, 3.0f);
             
-            if(nearest.player) {
-                // Validate pointer is still in our list before using
-                bool stillValid = false;
-                {
-                    std::lock_guard<std::mutex> lock(g_TargetMutex);
-                    stillValid = (targetsSet.find(nearest.player) != targetsSet.end());
+            if(!nearbyPlayers.empty()) {
+                // Build list of nearby players
+                std::string playersList;
+                for(size_t i = 0; i < nearbyPlayers.size(); i++) {
+                    if(i > 0) playersList += ", ";
+                    playersList += nearbyPlayers[i].name;
+                    char distBuf[16];
+                    snprintf(distBuf, sizeof(distBuf), " (%.1f)", nearbyPlayers[i].distance);
+                    playersList += distBuf;
                 }
                 
-                if(stillValid) {
-                    std::string nearestName = GetNickname(nearest.player);
-                    bool hasKilled = HasKilledThisRound(nearest.player);
-                    float realDistance = sqrtf(nearest.distanceSquared);
-                    AddDebugLog("[DEATH] %s died! Nearest: %s (%.1f) | Kill: %s", 
-                        deadPlayerName.c_str(), nearestName.c_str(), realDistance,
-                        hasKilled ? "Yes" : "No");
-                } else {
-                    AddDebugLog("[DEATH] %s died! (Nearest player left)", 
-                        deadPlayerName.c_str());
-                }
+                AddDebugLog("[DEATH] %s died! Nearby: %s", 
+                    deadPlayerName.c_str(), playersList.c_str());
             } else {
-                AddDebugLog("[DEATH] %s died! No nearby players found.", 
+                AddDebugLog("[DEATH] %s died! No players within range.", 
                     deadPlayerName.c_str());
             }
         } else {

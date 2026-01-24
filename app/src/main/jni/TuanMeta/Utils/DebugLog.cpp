@@ -20,3 +20,7 @@ void AddDebugLog(const char* fmt, ...) {
 const std::vector<std::string>& GetDebugLogs() {
     return debugLogs;
 }
+
+void ClearDebugLogs() {
+    debugLogs.clear();
+}

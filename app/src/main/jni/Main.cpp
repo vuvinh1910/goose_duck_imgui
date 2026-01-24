@@ -206,6 +206,11 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
                     pendingTeleportIndex.store(selected_index);
                     shouldDoTeleport.store(true);
                 }
+                
+                if (ImGui::Button(oxorany("DO_SPECTATOR"), ImVec2(-1, 50))) {
+                    pendingSpectatorIndex.store(selected_index);
+                    shouldDoSpectator.store(true);
+                }
             }
         }
 
@@ -216,6 +221,10 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
                 ImGui::TextUnformatted(line.c_str());
             }
             ImGui::EndChild();
+            
+            if (ImGui::SmallButton(oxorany("Clear"))) {
+                ClearDebugLogs();
+            }
         }
 
         ImGui::End();
