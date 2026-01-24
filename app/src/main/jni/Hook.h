@@ -25,7 +25,7 @@
 
 int speed = 5, zoom = 1;
 bool noFog, noCoolDown, callBell, noClip, fastTask, alwayMove, spectatorMode;
-uintptr_t playerCollider, disableMovement;
+uintptr_t playerCollider, disableMovement, fogMesh;
 
 // Use unordered_set for O(1) lookup instead of vector O(n)
 std::unordered_set<void*> targetsSet;
@@ -150,22 +150,6 @@ ObscuredBool BoolToObscuredBool(bool value) {
     return ObscuredBool_OpImplicit(value);
 }
 
-// Cached version - only lookup once
-void NoFog(void *instance) {
-    if(!cachedDisableFog) {
-        cachedDisableFog = (void*)GetMethodOffset(
-                oxorany("Assembly-CSharp.dll"),
-                oxorany("Handlers.GameHandlers.SpecialBehaviour"),
-                oxorany("FogOfWar"),
-                oxorany("Disable"),
-                0
-        );
-    }
-    if(cachedDisableFog) {
-        ((void (*)(void *))cachedDisableFog)(instance);
-    }
-}
-
 void AdjustCamera(void *instance, float value) {
     if(!cachedAdjustCamera) {
         cachedAdjustCamera = (void*)GetMethodOffset(
@@ -179,6 +163,11 @@ void AdjustCamera(void *instance, float value) {
     if(cachedAdjustCamera) {
         ((void (*)(void *, float))cachedAdjustCamera)(instance, value);
     }
+}
+
+void NoFog(void *instance) {
+    if(!instance) return;
+    *(void**)((uintptr_t)instance + fogMesh) = nullptr;
 }
 
 void (*_FogUpdate)(void *instance);
