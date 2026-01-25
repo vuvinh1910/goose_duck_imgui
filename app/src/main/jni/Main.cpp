@@ -175,6 +175,15 @@ EGLBoolean hook_eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
         if (Tab == 2) {
             static int selected_index = 0;
             
+            // Auto spectate dead player checkbox
+            ImGui::Checkbox(oxorany("Auto Spectate Dead (2s)"), &autoSpectateOnDeath);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(oxorany("Auto switch camera to dead player for 2 seconds"));
+            }
+            
+            ImGui::Separator();
+            ImGui::Spacing();
+            
             // Get thread-safe copy of targets
             auto players = GetTargetsCopy();
 

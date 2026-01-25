@@ -7,6 +7,7 @@
 #include <atomic>
 #include <float.h>
 #include <math.h>
+#include <chrono>
 #include "TuanMeta/IL2CppSDKGenerator/Vector3.h"
 
 #if defined(__aarch64__)
@@ -25,6 +26,7 @@
 
 int speed = 5, zoom = 1;
 bool noFog, noCoolDown, callBell, noClip, fastTask, alwayMove, spectatorMode;
+bool autoSpectateOnDeath = false; // Auto spectate dead player
 uintptr_t playerCollider, disableMovement, fogMesh;
 
 // Use unordered_set for O(1) lookup instead of vector O(n)
@@ -59,6 +61,13 @@ std::atomic<bool> shouldDoTeleport{false};
 // Spectator request - defer to main thread
 std::atomic<int> pendingSpectatorIndex{-1};
 std::atomic<bool> shouldDoSpectator{false};
+
+// Auto spectate dead player - queue system
+std::atomic<void*> pendingDeathSpectateTarget{nullptr};
+std::atomic<bool> shouldSpectateDeadPlayer{false};
+std::atomic<float> deathSpectateTimer{0.0f};
+std::atomic<bool> isSpectatingDeadPlayer{false};
+std::chrono::steady_clock::time_point lastDeathSpectateTime;
 
 #pragma pack(push, 4)
 
@@ -411,6 +420,36 @@ void PlayerUpdate(void *instance) {
             pendingSpectatorIndex.store(-1);
         }
         
+        // Handle auto spectate dead player
+        if(autoSpectateOnDeath) {
+            // Check if new death spectate request
+            if(shouldSpectateDeadPlayer.load()) {
+                void* target = pendingDeathSpectateTarget.load();
+                if(target) {
+                    DoSpectator(instance, target);
+                    isSpectatingDeadPlayer.store(true);
+                    lastDeathSpectateTime = std::chrono::steady_clock::now();
+                }
+                shouldSpectateDeadPlayer.store(false);
+            }
+            
+            // Check if should return camera to local player after 2 seconds
+            if(isSpectatingDeadPlayer.load()) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastDeathSpectateTime).count();
+                
+                if(elapsed >= 2000) { // 2 seconds
+                    // Return camera to local player
+                    void* localTransform = GetTransform(instance);
+                    if(localTransform && cachedSetCameraFollow) {
+                        ((void (*)(void*, void*))cachedSetCameraFollow)(instance, localTransform);
+                    }
+                    isSpectatingDeadPlayer.store(false);
+                    pendingDeathSpectateTarget.store(nullptr);
+                }
+            }
+        }
+        
         if(zoom > 1) {
             AdjustCamera(instance, (float)zoom);
         }
@@ -591,6 +630,16 @@ void (*_TurnIntoGhost)(void *instance, int deathReason);
 void TurnIntoGhost(void *instance, int deathReason) {
     if(instance) {
         std::string deadPlayerName = GetNickname(instance);
+        
+        // Auto spectate dead player feature
+        if(autoSpectateOnDeath && !IsLocalPlayer(instance)) {
+            // Set the dead player as spectate target
+            // This will reset the 2-second timer even if already spectating someone
+            pendingDeathSpectateTarget.store(instance);
+            shouldSpectateDeadPlayer.store(true);
+            // Reset the spectating flag to allow new timer
+            isSpectatingDeadPlayer.store(false);
+        }
         
         void* deadTransform = GetTransform(instance);
         if(deadTransform) {
