@@ -186,6 +186,14 @@ void FogUpdate(void *instance) {
     }
     _FogUpdate(instance);
 }
+
+bool (*_CanHearPlayer)(void *instance, void* targetController, void* otherPlayer, bool global);
+bool CanHearPlayer(void *instance, void* targetController, void* otherPlayer, bool global) {
+    if(noFog) {
+        return true;
+    }
+    return _CanHearPlayer(instance, targetController, otherPlayer, global);
+}
 void (*_set_Cooldown)(void *instance, ObscuredFloat value);
 void set_Cooldown(void *instance, ObscuredFloat value) {
     if(instance && noCoolDown) {

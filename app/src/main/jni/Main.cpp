@@ -272,6 +272,7 @@ void *Init_thread()
     fogMesh = GetFieldOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.SpecialBehaviour"), oxorany("FogOfWar") , oxorany("mesh"));
 
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.SpecialBehaviour"), oxorany("FogOfWar") , oxorany("FixedUpdate"), 0), (void *) FogUpdate , (void **) &_FogUpdate);
+    Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany(""), oxorany("VoiceChatHandler") , oxorany("CanHearPlayer"), 3), (void *) CanHearPlayer , (void **) &_CanHearPlayer);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.PlayerHandlers"), oxorany("LocalPlayer") , oxorany("FixedUpdate"), 0), (void *) PlayerUpdate , (void **) &_PlayerUpdate);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany(""), oxorany("UICooldownButton") , oxorany("set_Cooldown"), 1), (void *) set_Cooldown , (void **) &_set_Cooldown);
     Tools::Hook((void *) (uintptr_t) GetMethodOffset(oxorany("Assembly-CSharp.dll"), oxorany("Handlers.GameHandlers.TaskHandlers"), oxorany("TaskPanelHandler") , oxorany("OpenPanel"), 0), (void *) UpdatePanel , (void **) &_UpdatePanel);
