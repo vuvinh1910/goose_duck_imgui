@@ -187,13 +187,32 @@ void FogUpdate(void *instance) {
     _FogUpdate(instance);
 }
 
+static void* cachedLocalTransform = nullptr;
 bool (*_CanHearPlayer)(void *instance, void* targetController, void* otherPlayer, bool global);
 bool CanHearPlayer(void *instance, void* targetController, void* otherPlayer, bool global) {
-    if(noFog) {
-        return true;
+    if(noFog && otherPlayer && localPlayerPointer) {
+        // Cache local transform once
+        if(!cachedLocalTransform) {
+            cachedLocalTransform = GetTransform(localPlayerPointer);
+        }
+        
+        if(cachedLocalTransform) {
+            // Get other player transform
+            void* otherTransform = GetTransform(otherPlayer);
+            if(otherTransform) {
+                Vector3 otherPos = GetPosition(otherTransform);
+                Vector3 localPos = GetPosition(cachedLocalTransform);
+                
+                float distSq = CalculateDistanceSquared(otherPos, localPos);
+                if(distSq <= 84.0f) {
+                    return true;
+                }
+            }
+        }
     }
     return _CanHearPlayer(instance, targetController, otherPlayer, global);
 }
+
 void (*_set_Cooldown)(void *instance, ObscuredFloat value);
 void set_Cooldown(void *instance, ObscuredFloat value) {
     if(instance && noCoolDown) {
@@ -535,6 +554,7 @@ void OnDestroyEntity(void *instance) {
         
         // Reset pointers when game ends (entities destroyed)
         localPlayerPointer = nullptr;
+        cachedLocalTransform = nullptr; // Reset cached transform
     }
     _OnDestroyEntity(instance);
 }
