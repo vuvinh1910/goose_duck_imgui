@@ -49,7 +49,7 @@ static void* cachedGetTransform = nullptr;
 static void* cachedGetPosition = nullptr;
 static void* cachedSetPosition = nullptr;
 static void* cachedSetCameraFollow = nullptr;
-
+static void* cachedLocalTransform = nullptr;
 
 // Local player pointer
 void* localPlayerPointer = nullptr;
@@ -185,32 +185,6 @@ void FogUpdate(void *instance) {
         NoFog(instance);
     }
     _FogUpdate(instance);
-}
-
-static void* cachedLocalTransform = nullptr;
-bool (*_CanHearPlayer)(void *instance, void* targetController, void* otherPlayer, bool global);
-bool CanHearPlayer(void *instance, void* targetController, void* otherPlayer, bool global) {
-    if(noFog && otherPlayer && localPlayerPointer) {
-        // Cache local transform once
-        if(!cachedLocalTransform) {
-            cachedLocalTransform = GetTransform(localPlayerPointer);
-        }
-        
-        if(cachedLocalTransform) {
-            // Get other player transform
-            void* otherTransform = GetTransform(otherPlayer);
-            if(otherTransform) {
-                Vector3 otherPos = GetPosition(otherTransform);
-                Vector3 localPos = GetPosition(cachedLocalTransform);
-                
-                float distSq = CalculateDistanceSquared(otherPos, localPos);
-                if(distSq <= 84.0f) {
-                    return true;
-                }
-            }
-        }
-    }
-    return _CanHearPlayer(instance, targetController, otherPlayer, global);
 }
 
 void (*_set_Cooldown)(void *instance, ObscuredFloat value);
@@ -604,6 +578,31 @@ inline float CalculateDistanceSquared(Vector3 a, Vector3 b) {
 // Real distance when needed for display
 inline float CalculateDistance(Vector3 a, Vector3 b) {
     return sqrtf(CalculateDistanceSquared(a, b));
+}
+
+bool (*_CanHearPlayer)(void *instance, void* targetController, void* otherPlayer, bool global);
+bool CanHearPlayer(void *instance, void* targetController, void* otherPlayer, bool global) {
+    if(noFog && otherPlayer && localPlayerPointer) {
+        // Cache local transform once
+        if(!cachedLocalTransform) {
+            cachedLocalTransform = GetTransform(localPlayerPointer);
+        }
+        
+        if(cachedLocalTransform) {
+            // Get other player transform
+            void* otherTransform = GetTransform(otherPlayer);
+            if(otherTransform) {
+                Vector3 otherPos = GetPosition(otherTransform);
+                Vector3 localPos = GetPosition(cachedLocalTransform);
+                
+                float distSq = CalculateDistanceSquared(otherPos, localPos);
+                if(distSq <= 84.0f) {
+                    return true;
+                }
+            }
+        }
+    }
+    return _CanHearPlayer(instance, targetController, otherPlayer, global);
 }
 
 struct NearbyPlayerInfo {
