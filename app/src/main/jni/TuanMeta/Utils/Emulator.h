@@ -1,14 +1,25 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <thread>
-#include <linux/unistd.h>
+#include <unistd.h>
 #include <linux/memfd.h>
 #include <sys/syscall.h>
 #include <sys/system_properties.h>
 #include "xdl/xdl_util.h"
 
 void *Init_thread();
+
+static std::atomic<bool> g_init_done{false};
+
+inline void TryStartInitThread() {
+    bool expected = false;
+    if (g_init_done.compare_exchange_strong(expected, true)) {
+        std::thread(Init_thread).detach();
+    }
+}
+
 
 std::string GetLibDir(JavaVM *vms) {
     JNIEnv *env = nullptr;
@@ -169,18 +180,28 @@ void hack_prepare(const char *game_data_dir, void *data, size_t length) {
 #if defined(__i386__) || defined(__x86_64__)
     if (!NativeBridgeLoad(game_data_dir, api_level, data, length)) {
 #endif
-        Init_thread();
+        bool expected = false;
+        if (g_init_done.compare_exchange_strong(expected, true)) {
+            Init_thread();
+        }
 #if defined(__i386__) || defined(__x86_64__)
     }
 #endif
 }
 
 #if defined(__arm__) || defined(__aarch64__)
-
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
-    auto game_data_dir = (const char *) reserved;
-    std::thread(Init_thread).detach();
+    TryStartInitThread();
     return JNI_VERSION_1_6;
 }
-
 #endif
+
+extern "C" JNIEXPORT void hack_init() {
+    TryStartInitThread();
+}
+
+__attribute__((constructor))
+static void OnLibraryLoad() {
+    if (getuid() < 1000) return;
+    TryStartInitThread();
+}
